@@ -1,0 +1,190 @@
+version: 2
+
+# =============================================================================
+# dbt Source Declarations — Online Retail Pipeline
+# =============================================================================
+# IMPORTANT: This dbt project is used for QUALITY TESTING ONLY.
+# All tables declared here are built by PySpark notebooks, not dbt models.
+# dbt's role is to run schema.yml tests against these PySpark-built tables.
+#
+# Running `dbt test` executes all tests defined in silver/schema.yml and
+# gold/schema.yml against the live tables in Unity Catalog.
+# Running `dbt run` is NOT needed — there are no dbt transformation models.
+# =============================================================================
+
+sources:
+
+  # ---------------------------------------------------------------------------
+  # Silver layer — built by notebooks/02_transform_silver.py
+  # ---------------------------------------------------------------------------
+  - name: silver
+    database: workspace
+    schema: silver
+    description: >
+      Silver cleansed layer. Built by notebooks/02_transform_silver.py.
+      Contains typed, deduplicated, validated transaction records.
+
+    tables:
+      - name: transactions
+        description: >
+          Clean Online Retail transactions. Cancellations removed, types cast,
+          Revenue and OrderDate derived. Partitioned by order_date.
+        loaded_at_field: _silver_updated_at
+        freshness:
+          warn_after:  { count: 24, period: hour }
+          error_after: { count: 48, period: hour }
+        columns:
+          - name: invoice_no
+            description: Invoice number (cancellations removed).
+          - name: stock_code
+            description: Product code (trimmed, upper-cased).
+          - name: description
+            description: Product description (trimmed). NULL allowed.
+          - name: quantity
+            description: Units purchased (INT). Negative values quarantined.
+          - name: invoice_date
+            description: Transaction timestamp (parsed from M/d/yyyy H:mm).
+          - name: order_date
+            description: Date portion of invoice_date. Partition key.
+          - name: unit_price
+            description: Price per unit in GBP (DECIMAL 10,2). Zero allowed (free items).
+          - name: customer_id
+            description: Customer identifier (trimmed). NULL rows removed.
+          - name: country
+            description: Country of the customer (trimmed, upper-cased).
+          - name: revenue
+            description: Derived column — quantity * unit_price (DECIMAL 12,2).
+          - name: _source_file_name
+            description: Source file path from Auto Loader.
+          - name: _ingestion_timestamp
+            description: Timestamp when the row was written to Bronze.
+          - name: _pipeline_run_id
+            description: Pipeline run correlation ID.
+          - name: _silver_updated_at
+            description: Timestamp when dbt/PySpark last wrote this row to Silver.
+
+      - name: quality_failures
+        description: >
+          dbt test failures loaded by notebooks/05_load_quality_failures.py
+          after each dbt test run.
+        columns:
+          - name: pipeline_run_id
+            description: Correlated run ID.
+          - name: check_name
+            description: dbt test name.
+          - name: model_name
+            description: Table the test ran against.
+          - name: severity
+            description: "warn or error."
+          - name: failing_row_count
+            description: Number of rows that failed the test.
+          - name: sample_failing_values
+            description: JSON string of the dbt test failure message.
+          - name: recorded_at
+            description: When this failure row was written.
+
+  # ---------------------------------------------------------------------------
+  # Gold layer — built by notebooks/03_build_gold.py
+  # ---------------------------------------------------------------------------
+  - name: gold
+    database: workspace
+    schema: gold
+    description: >
+      Gold dimensional model. Built by notebooks/03_build_gold.py.
+      Star schema: fact_sales + dim_customer (SCD2) + dim_product + dim_date + dim_country.
+
+    tables:
+      - name: fact_sales
+        description: >
+          Sales fact table. Grain: one row per invoice line item (InvoiceNo + StockCode).
+          Partitioned by year/month.
+        columns:
+          - name: sale_key
+            description: "Deterministic hash surrogate: xxhash64(invoice_no, stock_code, invoice_date, customer_id)."
+          - name: invoice_no
+            description: Invoice number.
+          - name: customer_key
+            description: FK → dim_customer (SCD2 version active at invoice date).
+          - name: product_key
+            description: FK → dim_product.
+          - name: date_key
+            description: FK → dim_date (YYYYMMDD integer).
+          - name: country_key
+            description: FK → dim_country.
+          - name: quantity
+            description: Units sold.
+          - name: unit_price
+            description: Price per unit in GBP.
+          - name: revenue
+            description: quantity × unit_price.
+          - name: order_count
+            description: Always 1 at line-item grain; SUM for order-level aggregation.
+          - name: year
+            description: Partition column derived from date_key.
+          - name: month
+            description: Partition column derived from date_key.
+          - name: _pipeline_run_id
+            description: Correlation ID.
+
+      - name: dim_customer
+        description: >
+          Customer dimension with SCD Type 2 tracking country changes.
+        columns:
+          - name: customer_key
+            description: "Deterministic hash surrogate: xxhash64(customer_id, effective_date)."
+          - name: customer_id
+            description: Natural key — customer identifier.
+          - name: country
+            description: Country for this version.
+          - name: customer_segment
+            description: "High Value (>=£1000), Mid Value (>=£200), Low Value (<£200)."
+          - name: effective_date
+            description: Date this version became active.
+          - name: expiry_date
+            description: Date this version was superseded (NULL for current record).
+          - name: current_flag
+            description: True for the current active version.
+
+      - name: dim_product
+        description: Product dimension with keyword-derived category.
+        columns:
+          - name: product_key
+            description: "Deterministic hash surrogate: xxhash64(stock_code)."
+          - name: stock_code
+            description: Product code (natural key).
+          - name: description
+            description: Most recent non-null product description.
+          - name: category
+            description: Keyword-derived category (Lighting, Seasonal, Gifts, Bags, Home Decor, Kitchen, Garden, Toys, General).
+
+      - name: dim_date
+        description: Date dimension — date spine generated from Silver order_date range.
+        columns:
+          - name: date_key
+            description: YYYYMMDD integer key (e.g. 20101201).
+          - name: full_date
+            description: Calendar date.
+          - name: day
+            description: Day of month (1-31).
+          - name: month
+            description: Month number (1-12).
+          - name: month_name
+            description: Month name (e.g. January).
+          - name: quarter
+            description: Quarter (1-4).
+          - name: year
+            description: Calendar year.
+          - name: week_of_year
+            description: ISO week number.
+          - name: weekend_flag
+            description: True if Saturday or Sunday.
+
+      - name: dim_country
+        description: Country dimension with derived region mapping.
+        columns:
+          - name: country_key
+            description: "Deterministic hash surrogate: xxhash64(country_name)."
+          - name: country_name
+            description: Country name (upper-cased).
+          - name: region
+            description: "Derived region: Europe, North America, Asia-Pacific, Middle East, Other."
