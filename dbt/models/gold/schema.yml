@@ -1,0 +1,163 @@
+version: 2
+
+# =============================================================================
+# Gold Layer Tests — fact_sales + dim_*
+# =============================================================================
+# These tests run against the PySpark-built Gold tables.
+# No dbt transformation models exist — dbt is used for testing only.
+# =============================================================================
+
+sources:
+  - name: gold
+    tables:
+
+      # -----------------------------------------------------------------------
+      # fact_sales
+      # -----------------------------------------------------------------------
+      - name: fact_sales
+        description: >
+          Sales fact table. Grain: one row per invoice line item.
+          Partitioned by year/month.
+        columns:
+          - name: sale_key
+            description: Deterministic hash surrogate.
+            tests:
+              - not_null:
+                  severity: error
+              - unique:
+                  severity: error
+
+          - name: customer_key
+            description: FK → dim_customer.
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: product_key
+            description: FK → dim_product.
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: date_key
+            description: FK → dim_date (YYYYMMDD).
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: country_key
+            description: FK → dim_country.
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: quantity
+            description: Units sold.
+            tests:
+              - assert_positive_value:
+                  severity: error
+
+          - name: revenue
+            description: quantity × unit_price.
+            tests:
+              - assert_non_negative_value:
+                  severity: warn
+
+      # -----------------------------------------------------------------------
+      # dim_customer
+      # -----------------------------------------------------------------------
+      - name: dim_customer
+        description: Customer dimension with SCD Type 2.
+        columns:
+          - name: customer_key
+            description: Deterministic hash surrogate.
+            tests:
+              - not_null:
+                  severity: error
+              - unique:
+                  severity: error
+
+          - name: customer_id
+            description: Natural key.
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: effective_date
+            description: Date this version became active.
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: current_flag
+            description: True for the current active version.
+            tests:
+              - not_null:
+                  severity: error
+              - accepted_values:
+                  values: [true, false]
+                  severity: error
+
+      # -----------------------------------------------------------------------
+      # dim_product
+      # -----------------------------------------------------------------------
+      - name: dim_product
+        description: Product dimension with keyword-derived category.
+        columns:
+          - name: product_key
+            description: Deterministic hash surrogate.
+            tests:
+              - not_null:
+                  severity: error
+              - unique:
+                  severity: error
+
+          - name: stock_code
+            description: Natural key.
+            tests:
+              - not_null:
+                  severity: error
+              - unique:
+                  severity: error
+
+      # -----------------------------------------------------------------------
+      # dim_date
+      # -----------------------------------------------------------------------
+      - name: dim_date
+        description: Date dimension — date spine.
+        columns:
+          - name: date_key
+            description: YYYYMMDD integer key.
+            tests:
+              - not_null:
+                  severity: error
+              - unique:
+                  severity: error
+
+          - name: full_date
+            description: Calendar date.
+            tests:
+              - not_null:
+                  severity: error
+
+      # -----------------------------------------------------------------------
+      # dim_country
+      # -----------------------------------------------------------------------
+      - name: dim_country
+        description: Country dimension with region mapping.
+        columns:
+          - name: country_key
+            description: Deterministic hash surrogate.
+            tests:
+              - not_null:
+                  severity: error
+              - unique:
+                  severity: error
+
+          - name: country_name
+            description: Country name (upper-cased).
+            tests:
+              - not_null:
+                  severity: error
+              - unique:
+                  severity: error
