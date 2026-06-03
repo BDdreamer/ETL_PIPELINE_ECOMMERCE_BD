@@ -1,0 +1,132 @@
+# =============================================================================
+# resources/workflow.yml — Databricks Workflow Resource (DAB)
+# =============================================================================
+# PURPOSE:
+#   Defines the 6-task Databricks Workflow that orchestrates the Online Retail
+#   Pipeline end-to-end. Included by databricks.yml via `include: resources/*.yml`.
+#
+# TASK DEPENDENCY ORDER:
+#   ingest_bronze → transform_silver → build_gold → dbt_test
+#     → load_quality_failures → audit_log
+#
+# COMPUTE:
+#   `serverless: true` at the job level covers notebook tasks.
+#   dbt_task tasks require `warehouse_id` set explicitly on the task itself —
+#   dbt executes SQL against a Databricks SQL warehouse, which is separate from
+#   the serverless compute used by notebook tasks. Omitting warehouse_id from
+#   a dbt_task will cause a runtime error even when serverless: true is set
+#   at the job level. The two settings are independent:
+#     - serverless: true  → compute for notebook/Python tasks
+#     - warehouse_id      → SQL warehouse for dbt_task tasks
+#
+# SCHEDULE:
+#   Controlled by ${var.cron_schedule}. Set to pause_status: PAUSED so the
+#   schedule does not fire automatically in dev — trigger runs manually.
+#   In prod, the schedule runs at 04:00 UTC daily.
+# =============================================================================
+
+resources:
+  jobs:
+    online_retail_pipeline_workflow:
+      name: online_retail_pipeline_workflow
+      description: >
+        End-to-end Online Retail Pipeline: Bronze ingestion via Auto Loader,
+        Silver PySpark transformations, Gold star schema dimensional model
+        (SCD Type 2), dbt quality tests, and audit logging.
+        Runs on serverless compute (Free Edition compatible).
+
+      # Serverless compute for notebook tasks.
+      # NOTE: dbt_task tasks also need warehouse_id set at the task level.
+      serverless: true
+
+      schedule:
+        quartz_cron_expression: ${var.cron_schedule}
+        timezone_id: UTC
+        # PAUSED in dev — trigger manually with:
+        #   databricks bundle run online_retail_pipeline_workflow --target dev
+        # Set to UNPAUSED in prod target override or remove this block.
+        pause_status: PAUSED
+
+      tasks:
+
+        # =====================================================================
+        # Task 1: ingest_bronze
+        # =====================================================================
+        # Reads online_retail.csv from the landing Volume using Auto Loader.
+        # Writes to workspace.bronze.raw_online_retail.
+        # Sets pipeline_run_id task value for all downstream tasks.
+        - task_key: ingest_bronze
+          notebook_task:
+            notebook_path: notebooks/01_ingest_bronze.py
+            source: WORKSPACE
+
+        # =====================================================================
+        # Task 2: transform_silver
+        # =====================================================================
+        # PySpark transformations: null handling, cancellation removal,
+        # type casting, quarantine isolation, deduplication, derived columns.
+        # Writes to workspace.silver.transactions (partitioned by order_date).
+        - task_key: transform_silver
+          depends_on:
+            - task_key: ingest_bronze
+          notebook_task:
+            notebook_path: notebooks/02_transform_silver.py
+            source: WORKSPACE
+
+        # =====================================================================
+        # Task 3: build_gold
+        # =====================================================================
+        # PySpark star schema build: dim_date, dim_country, dim_product,
+        # dim_customer (SCD Type 2), fact_sales.
+        # Uses incremental MERGE-based upserts for all Gold tables.
+        - task_key: build_gold
+          depends_on:
+            - task_key: transform_silver
+          notebook_task:
+            notebook_path: notebooks/03_build_gold.py
+            source: WORKSPACE
+
+        # =====================================================================
+        # Task 4: dbt_test
+        # =====================================================================
+        # Runs dbt schema.yml tests against the PySpark-built Silver and Gold
+        # tables. No dbt run — this project has no dbt transformation models.
+        #
+        # warehouse_id is REQUIRED on dbt_task tasks specifically.
+        # serverless: true at the job level does NOT cover dbt_task execution.
+        # dbt_task executes SQL against a Databricks SQL warehouse.
+        - task_key: dbt_test
+          depends_on:
+            - task_key: build_gold
+          dbt_task:
+            project_directory: dbt
+            commands:
+              - "dbt test"
+            # warehouse_id is required on dbt_task — not covered by job-level serverless: true
+            warehouse_id: ${var.warehouse_id}
+
+        # =====================================================================
+        # Task 5: load_quality_failures
+        # =====================================================================
+        # Reads dbt/target/run_results.json after dbt test completes.
+        # Parses test failures and writes to workspace.silver.quality_failures.
+        # Severity control: error → raise exception (halts pipeline),
+        #                   warn  → log and continue.
+        - task_key: load_quality_failures
+          depends_on:
+            - task_key: dbt_test
+          notebook_task:
+            notebook_path: notebooks/05_load_quality_failures.py
+            source: WORKSPACE
+
+        # =====================================================================
+        # Task 6: audit_log
+        # =====================================================================
+        # Writes PIPELINE_COMPLETE event to workspace.bronze.pipeline_audit_log.
+        # Records total rows, models refreshed, duration, and status.
+        - task_key: audit_log
+          depends_on:
+            - task_key: load_quality_failures
+          notebook_task:
+            notebook_path: notebooks/04_audit_log.py
+            source: WORKSPACE
