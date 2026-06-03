@@ -1,0 +1,75 @@
+# =============================================================================
+# Databricks Asset Bundle — Online Retail Pipeline
+# =============================================================================
+# Dataset: UCI Online Retail (~541,000 UK e-commerce transactions, 2010–2011)
+# Architecture: Bronze → Silver (PySpark) → Gold (Star Schema, SCD Type 2)
+# Quality testing: dbt tests-only (no dbt transformation models)
+#
+# Naming convention: all Unity Catalog references use the three-level namespace
+#   workspace.<schema>.<table>
+# The `workspace` catalog is auto-provisioned by Databricks Free Edition.
+# All compute is serverless (serverless: true) — no classic clusters.
+# Secrets are referenced via {{secrets/<scope>/<key>}} — never hardcoded.
+# =============================================================================
+
+bundle:
+  name: online_retail_pipeline
+
+# ---------------------------------------------------------------------------
+# Variables — override per target in the `targets` block below
+# ---------------------------------------------------------------------------
+variables:
+  catalog_name:
+    description: Unity Catalog catalog name (workspace is auto-provisioned on Free Edition)
+    default: workspace
+
+  warehouse_id:
+    description: >
+      Serverless SQL warehouse ID required by dbt_task tasks.
+      dbt_task executes SQL against a SQL warehouse — this is separate from
+      the serverless compute used by notebook tasks. Both are required.
+      Find this in: SQL Warehouses > <your warehouse> > Connection details
+      (last segment of the HTTP path after /sql/1.0/warehouses/).
+    default: ""
+
+  cron_schedule:
+    description: Quartz cron expression for the pipeline schedule
+    default: "0 0 6 * * ?"   # 06:00 UTC daily (dev default — paused in dev target)
+
+  databricks_host:
+    description: Databricks workspace URL (e.g. https://adb-xxxx.azuredatabricks.net)
+    default: ""
+
+# ---------------------------------------------------------------------------
+# Include DAB resource files
+# ---------------------------------------------------------------------------
+include:
+  - resources/*.yml
+
+# ---------------------------------------------------------------------------
+# Targets
+# ---------------------------------------------------------------------------
+targets:
+
+  # ---------- dev -----------------------------------------------------------
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: ${var.databricks_host}
+    variables:
+      catalog_name: workspace
+      # Set your dev SQL warehouse ID here:
+      # warehouse_id: "<your-dev-warehouse-id>"
+      cron_schedule: "0 0 6 * * ?"   # Schedule is PAUSED in dev — trigger manually
+
+  # ---------- prod ----------------------------------------------------------
+  prod:
+    mode: production
+    workspace:
+      host: ${var.databricks_host}
+    variables:
+      catalog_name: workspace
+      # Set your prod SQL warehouse ID here:
+      # warehouse_id: "<your-prod-warehouse-id>"
+      cron_schedule: "0 0 4 * * ?"   # 04:00 UTC daily in prod

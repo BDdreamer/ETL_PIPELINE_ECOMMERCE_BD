@@ -1,0 +1,26 @@
+# =============================================================================
+# Online Retail Pipeline — Python Dependencies
+# =============================================================================
+# Install with: pip install -r requirements.txt
+# =============================================================================
+
+# Databricks CLI — used for `databricks bundle deploy/run` and file uploads
+databricks-cli==0.18.0
+
+# dbt Core — the transformation framework (used for testing only in this pipeline)
+dbt-core==1.8.7
+
+# dbt-databricks adapter — connects dbt to Databricks SQL warehouses via Unity Catalog
+dbt-databricks==1.8.7
+
+# openpyxl — for reading the Online Retail XLSX file locally before converting to CSV
+openpyxl==3.1.2
+
+# PyYAML — required by dbt for YAML parsing
+PyYAML==6.0.2
+
+# Requests — HTTP client used by dbt and databricks-cli
+requests==2.32.3
+
+# Jinja2 — dbt's templating engine
+Jinja2==3.1.4

@@ -1,0 +1,75 @@
+# =============================================================================
+# Netflix Medallion Pipeline — .gitignore
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Databricks
+# ---------------------------------------------------------------------------
+.databricks/
+.databricks.env
+*.token
+*.pat
+
+# ---------------------------------------------------------------------------
+# dbt
+# ---------------------------------------------------------------------------
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+
+# profiles.yml may contain credentials — exclude it from version control.
+# Use environment variables (DATABRICKS_HOST, DATABRICKS_TOKEN) instead.
+# The profiles.yml in this repo uses env_var() so it's safe to commit,
+# but if you add plaintext credentials, add it here.
+# dbt/profiles.yml
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# ---------------------------------------------------------------------------
+# Secrets and credentials
+# ---------------------------------------------------------------------------
+.env
+.env.*
+*.secret
+secrets/
+credentials.json
+service_account.json
+
+# ---------------------------------------------------------------------------
+# IDE and OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# CI/CD
+# ---------------------------------------------------------------------------
+.github/workflows/*.local.yml
