@@ -1,0 +1,40 @@
+# =============================================================================
+# dbt Profiles — Online Retail Pipeline
+# =============================================================================
+# This file configures the dbt-databricks adapter connection.
+# dbt connects to a Databricks SQL warehouse to run tests against the
+# PySpark-built tables in Unity Catalog.
+#
+# IMPORTANT: Do NOT commit this file with real credentials.
+# Use environment variables for all sensitive values.
+#
+# How to find your HTTP path:
+#   Databricks UI → SQL Warehouses → <your warehouse> → Connection details
+#   Copy the value under "HTTP path" (e.g. /sql/1.0/warehouses/abc123def456)
+#
+# Authentication:
+#   Set DATABRICKS_TOKEN environment variable (Personal Access Token)
+#   Or use OAuth: `databricks auth login` and omit the token field
+# =============================================================================
+
+online_retail_pipeline:
+  target: dev
+  outputs:
+
+    dev:
+      type: databricks
+      catalog: workspace          # Unity Catalog catalog (auto-provisioned on Free Edition)
+      schema: silver              # Default schema; tests reference tables via sources.yml
+      host: "{{ env_var('DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DATABRICKS_TOKEN', '') }}"
+      threads: 4
+
+    prod:
+      type: databricks
+      catalog: workspace
+      schema: silver
+      host: "{{ env_var('DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DATABRICKS_TOKEN', '') }}"
+      threads: 8

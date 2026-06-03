@@ -1,0 +1,49 @@
+# =============================================================================
+# dbt Project Configuration — Online Retail Pipeline
+# =============================================================================
+# IMPORTANT: This dbt project is used for QUALITY TESTING ONLY.
+# There are NO dbt transformation models (.sql files) in this project.
+# All Silver and Gold tables are built by PySpark notebooks:
+#   - notebooks/02_transform_silver.py → workspace.silver.transactions
+#   - notebooks/03_build_gold.py       → workspace.gold.dim_* + fact_sales
+#
+# dbt's role here is to run schema.yml tests against the PySpark-built tables:
+#   dbt test   ← runs all tests defined in models/silver/schema.yml
+#               and models/gold/schema.yml
+#   dbt compile ← validates sources and macros (used in CI)
+#
+# No `dbt run` is needed or used in this pipeline.
+# =============================================================================
+
+name: online_retail_pipeline
+version: "1.0.0"
+config-version: 2
+
+profile: online_retail_pipeline
+
+# ---------------------------------------------------------------------------
+# File paths
+# ---------------------------------------------------------------------------
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# ---------------------------------------------------------------------------
+# No model materialisation configs — this project has no .sql model files.
+# The models/ directory contains only sources.yml and schema.yml test files.
+# ---------------------------------------------------------------------------
+models:
+  online_retail_pipeline: {}
+
+# ---------------------------------------------------------------------------
+# Variable defaults
+# pipeline_run_id is not used by dbt models (no models exist) but is
+# available for any future macro or test that needs it.
+# ---------------------------------------------------------------------------
+vars:
+  pipeline_run_id: "manual"
