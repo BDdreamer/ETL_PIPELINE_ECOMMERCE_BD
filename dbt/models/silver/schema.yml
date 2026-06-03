@@ -1,0 +1,80 @@
+version: 2
+
+# =============================================================================
+# Silver Layer Tests — silver.transactions
+# =============================================================================
+# These tests run against the PySpark-built silver.transactions table.
+# No dbt transformation models exist — dbt is used for testing only.
+#
+# Severity rationale:
+#   severity: error — critical checks that halt the pipeline on failure
+#   severity: warn  — non-critical checks that log and continue
+#
+# Tests are declared on the SOURCE table (not a dbt model) because
+# silver.transactions is built by PySpark, not dbt.
+# =============================================================================
+
+sources:
+  - name: silver
+    tables:
+      - name: transactions
+        tests:
+          # Composite uniqueness: (invoice_no, stock_code, invoice_date, quantity)
+          # This is the deduplication key used in the Silver PySpark notebook.
+          # A duplicate on this key means the deduplication step failed.
+          - assert_composite_unique:
+              columns: ["invoice_no", "stock_code", "invoice_date", "quantity"]
+              severity: error
+
+        columns:
+          - name: invoice_no
+            description: Invoice number (cancellations removed).
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: stock_code
+            description: Product code (trimmed, upper-cased).
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: customer_id
+            description: Customer identifier (trimmed). NULL rows removed in Silver.
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: order_date
+            description: Date portion of invoice_date. Partition key.
+            tests:
+              - not_null:
+                  severity: error
+
+          - name: quantity
+            description: Units purchased (INT). Negative values quarantined.
+            tests:
+              # quantity must be > 0 — negative values should have been quarantined
+              - assert_positive_value:
+                  severity: error
+
+          - name: unit_price
+            description: Price per unit in GBP. Zero is allowed (free/promotional items).
+            tests:
+              # unit_price must be >= 0 — negative prices should have been quarantined
+              # severity: warn because zero-price rows are valid and pass through
+              - assert_non_negative_value:
+                  severity: warn
+
+          - name: revenue
+            description: Derived — quantity * unit_price.
+            tests:
+              # revenue should be >= 0 given quantity > 0 and unit_price >= 0
+              - assert_non_negative_value:
+                  severity: warn
+
+          - name: invoice_date
+            description: Transaction timestamp.
+            tests:
+              - not_null:
+                  severity: error
