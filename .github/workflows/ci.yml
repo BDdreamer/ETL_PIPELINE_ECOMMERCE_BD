@@ -1,0 +1,137 @@
+# =============================================================================
+# CI/CD Pipeline — Online Retail Pipeline
+# =============================================================================
+#
+# THREE-STAGE PROMOTION PATH:
+#
+#   1. validate (every PR)
+#      Runs `databricks bundle validate` for both targets and `dbt compile`.
+#      No deployment occurs. Catches config errors before they reach dev.
+#      Note: `dbt compile` validates sources and macros even with no models.
+#
+#   2. deploy-dev (merge to main)
+#      Automatically deploys to the dev target after every merge to main.
+#      Runs only after validate passes.
+#
+#   3. deploy-prod (manual approval required)
+#      Deploys to prod after deploy-dev succeeds, but ONLY after a human
+#      approves the deployment via the GitHub Environment protection rule.
+#
+# HOW TO CONFIGURE THE PROD APPROVAL GATE:
+#   1. Go to GitHub → Settings → Environments → Create environment → "prod"
+#   2. Under "Deployment protection rules", add "Required reviewers"
+#   3. Add yourself (or your team) as a required reviewer
+#   4. The deploy-prod job references `environment: prod`, which triggers
+#      the protection rule and pauses the workflow until approved.
+#
+# REQUIRED GITHUB SECRETS:
+#   DATABRICKS_HOST        — workspace URL (https://adb-xxx.azuredatabricks.net)
+#   DATABRICKS_TOKEN       — personal access token with deploy permissions
+#   DATABRICKS_HTTP_PATH   — SQL warehouse HTTP path for dbt compile
+#                            (e.g. /sql/1.0/warehouses/abc123)
+#
+#   Set these at: GitHub → Settings → Secrets and variables → Actions
+# =============================================================================
+
+name: Online Retail Pipeline CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+  DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: validate
+  # Runs on every PR and every push to main.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate Bundle and dbt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate DAB — dev target
+        run: databricks bundle validate --target dev
+
+      - name: Validate DAB — prod target
+        run: databricks bundle validate --target prod
+
+      - name: Compile dbt project
+        # dbt compile validates sources.yml and macros even with no .sql models.
+        # It confirms that all source declarations are syntactically valid and
+        # that custom generic test macros compile without errors.
+        # No SQL is executed against the warehouse during compile.
+        env:
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+        run: |
+          cd dbt
+          dbt deps
+          dbt compile --target dev
+
+  # ---------------------------------------------------------------------------
+  # Job 2: deploy-dev
+  # Runs on push to main (after a PR is merged).
+  # ---------------------------------------------------------------------------
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Deploy to dev
+        run: databricks bundle deploy --target dev
+
+  # ---------------------------------------------------------------------------
+  # Job 3: deploy-prod
+  # Requires manual approval via the GitHub "prod" environment protection rule.
+  # ---------------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy to Prod
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    # The `environment: prod` reference triggers the GitHub Environment
+    # protection rule. The workflow pauses until a required reviewer approves.
+    environment: prod
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Deploy to prod
+        run: databricks bundle deploy --target prod
